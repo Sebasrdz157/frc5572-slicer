@@ -332,6 +332,7 @@ function renderObjects() {
   $('t-arrange').disabled = !has;
   renderInspector();
   const out = viewer.parts.filter(p => p.out).length;
+  if (view === 'preview' && lastSlice) return; // preview shows time / weight / cost there instead
   $('topbar-status').textContent = out ? `${out} object${out > 1 ? 's' : ''} outside the printable area` : has ? `${viewer.parts.length} object${viewer.parts.length > 1 ? 's' : ''} on plate` : '';
 }
 
@@ -586,12 +587,11 @@ function setView(v) {
     viewer.setLayFlat(false);
     viewer.showToolpaths(lastSlice.info);
     range = { lo: 1, hi: lastSlice.info.layers };
-    renderLegend();
-    renderSlider();
   } else {
     viewer.clearToolpaths();
   }
   renderObjects();
+  if (preview) { renderLegend(); renderSlider(); }
 }
 document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => !b.disabled && setView(b.dataset.view)));
 
