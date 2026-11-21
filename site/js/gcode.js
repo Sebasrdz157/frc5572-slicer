@@ -1,58 +1,83 @@
-// Parse sliced G-code into preview geometry and print statistics.
+// Parse sliced G-code into preview geometry (one line set per feature type)
+// and statistics (time / filament per feature, per layer).
 
 export const FEATURES = {
-  shells:  { label: 'Walls',   color: [0.93, 0.62, 0.0] },
-  solid:   { label: 'Solid',   color: [0.85, 0.30, 0.25] },
-  sparse:  { label: 'Infill',  color: [0.62, 0.42, 0.20] },
-  support: { label: 'Support', color: [0.18, 0.65, 0.63] },
-  brim:    { label: 'Skirt / brim', color: [0.45, 0.55, 0.85] },
-  other:   { label: 'Other',   color: [0.55, 0.55, 0.55] },
+  wall:    { label: 'Wall',          color: [1.00, 0.55, 0.20] },
+  solid:   { label: 'Solid infill',  color: [0.80, 0.25, 0.70] },
+  sparse:  { label: 'Sparse infill', color: [0.69, 0.19, 0.19] },
+  support: { label: 'Support',       color: [0.20, 0.75, 0.40] },
+  brim:    { label: 'Skirt / brim',  color: [0.00, 0.53, 0.53] },
+  travel:  { label: 'Travel',        color: [0.25, 0.45, 0.95] },
 };
+export const FEATURE_KEYS = Object.keys(FEATURES);
 
 function featureKey(text) {
   if (text.includes('brim') || text.includes('skirt') || text.includes('raft')) return 'brim';
-  if (text.includes('shell')) return 'shells';
+  if (text.includes('shell')) return 'wall';
   if (text.includes('solid')) return 'solid';
   if (text.includes('sparse') || text.includes('infill')) return 'sparse';
   if (text.includes('support')) return 'support';
-  return 'other';
+  return 'wall';
 }
 
 /**
  * @param {string} gcode
- * @param {object} opts - { bed:{x,y}, originCenter, accel (mm/s^2), filamentDiameter, density }
+ * @param {object} o { bed:{x,y}, originCenter, accel, filamentDiameter, density, cost }
  */
-export function parseGcode(gcode, opts) {
-  const ox = opts.originCenter ? 0 : opts.bed.x / 2;
-  const oy = opts.originCenter ? 0 : opts.bed.y / 2;
-  const accel = opts.accel || 1500;
-  const minJunction = 5; // mm/s, rough stand-in for jerk / square corner velocity
+export function parseGcode(gcode, o) {
+  const ox = o.originCenter ? 0 : o.bed.x / 2;
+  const oy = o.originCenter ? 0 : o.bed.y / 2;
+  const fArea = Math.PI * ((o.filamentDiameter || 1.75) / 2) ** 2;
+  const maxAccel = o.accel || 1500;
+  let accel = maxAccel;
+  const minJunction = 5;
 
-  const pos = [];
-  const col = [];
-  const layerEnds = [];
+  const sets = {};
+  for (const k of FEATURE_KEYS) sets[k] = { pos: [], speed: [], flow: [], ends: [] };
+  const stats = {};
+  for (const k of FEATURE_KEYS) stats[k] = { time: 0, filament: 0 };
+  const layerZ = [];
+  const layerTime = [];
   let layer = -1;
-  let x = 0, y = 0, z = 0, f = 3000 / 60;
-  let feature = 'other';
-  let extruded = 0;
-  let maxZ = 0;
-  let time = 0;
+  let x = 0, y = 0, z = 0, f = 50;
+  let feature = 'wall';
+  let extruded = 0, time = 0, maxZ = 0;
   let prevDir = null, prevV = 0;
+  let layerStartTime = 0;
 
-  const lines = gcode.split('\n');
-  for (let raw of lines) {
+  const closeLayer = () => {
+    if (layer < 0) return;
+    for (const k of FEATURE_KEYS) sets[k].ends.push(sets[k].pos.length / 3);
+    layerTime.push(time - layerStartTime);
+  };
+
+  for (const raw of gcode.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
     if (line[0] === ';') {
       if (line.startsWith(';LAYER_CHANGE')) {
-        if (layer >= 0) layerEnds.push(pos.length / 3);
+        closeLayer();
         layer++;
+        layerStartTime = time;
+        layerZ.push(null);
+      } else if (line.startsWith(';Z:') && layer >= 0) {
+        layerZ[layer] = parseFloat(line.slice(3));
       } else if (line.startsWith('; feature ')) {
         feature = featureKey(line.slice(10));
       }
       continue;
     }
-    const code = line.split(';')[0];
+    const code = line.split(';')[0].trim();
+    if (code.startsWith('SET_VELOCITY_LIMIT')) {
+      const m = code.match(/ACCEL=(\d+(?:\.\d+)?)/);
+      if (m) accel = Math.min(maxAccel, +m[1]);
+      continue;
+    }
+    if (code.startsWith('M204')) {
+      const m = code.match(/[PS](\d+(?:\.\d+)?)/);
+      if (m) accel = Math.min(maxAccel, +m[1]);
+      continue;
+    }
     if (!(code.startsWith('G0') || code.startsWith('G1')) || /^G1\d/.test(code)) continue;
 
     let nx = x, ny = y, nz = z, e = 0;
@@ -69,58 +94,77 @@ export function parseGcode(gcode, opts) {
     const dx = nx - x, dy = ny - y, dz = nz - z;
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-    // time estimate: trapezoid profile with a crude junction-speed model
+    // time: trapezoid profile with a simple junction-speed model
+    let dt = 0;
     if (dist > 0) {
       const v = f;
       const dir = [dx / dist, dy / dist, dz / dist];
-      let vEntry = minJunction;
+      let vj = minJunction;
       if (prevDir) {
         const cos = dir[0] * prevDir[0] + dir[1] * prevDir[1] + dir[2] * prevDir[2];
-        vEntry = Math.max(minJunction, Math.min(v, prevV) * (1 + cos) / 2);
+        vj = Math.max(minJunction, Math.min(v, prevV) * (1 + cos) / 2);
       }
-      const vExit = vEntry;
-      const dAcc = Math.max(0, (v * v - vEntry * vEntry) / (2 * accel));
-      const dDec = Math.max(0, (v * v - vExit * vExit) / (2 * accel));
-      if (dAcc + dDec <= dist) {
-        time += (v - vEntry) / accel + (v - vExit) / accel + (dist - dAcc - dDec) / v;
-      } else {
-        const vPeak = Math.sqrt(accel * dist + (vEntry * vEntry + vExit * vExit) / 2);
-        time += (vPeak - vEntry) / accel + (vPeak - vExit) / accel;
-      }
+      const dAcc = Math.max(0, (v * v - vj * vj) / (2 * accel));
+      if (2 * dAcc <= dist) dt = 2 * (v - vj) / accel + (dist - 2 * dAcc) / v;
+      else dt = 2 * (Math.sqrt(accel * dist + vj * vj) - vj) / accel;
       prevDir = dir; prevV = v;
     } else if (e !== 0) {
-      time += Math.abs(e) / f; // retract / unretract
+      dt = Math.abs(e) / f;
     }
+    time += dt;
 
+    const printing = e > 0 && (dx || dy);
     if (e > 0) extruded += e;
-    if (e > 0 && layer >= 0 && (dx || dy)) {
-      if (nz > maxZ) maxZ = nz;
-      pos.push(x - ox, y - oy, z, nx - ox, ny - oy, nz);
-      const c = FEATURES[feature].color;
-      col.push(c[0], c[1], c[2], c[0], c[1], c[2]);
+    if (layer >= 0) {
+      const key = printing ? feature : (dist > 0 && (dx || dy) ? 'travel' : null);
+      if (key) {
+        const s = sets[key];
+        s.pos.push(x - ox, y - oy, z, nx - ox, ny - oy, nz);
+        const flow = printing ? (e * fArea) / dist * f : 0; // mm^3/s
+        s.speed.push(f, f);
+        s.flow.push(flow, flow);
+        stats[key].time += dt;
+        if (printing) { stats[key].filament += e; if (nz > maxZ) maxZ = nz; }
+      }
     }
     x = nx; y = ny; z = nz;
   }
-  if (layer >= 0) layerEnds.push(pos.length / 3);
+  closeLayer();
 
-  const positions = new Float32Array(pos);
-  const colors = new Float32Array(col);
+  const out = {};
+  for (const k of FEATURE_KEYS) {
+    const s = sets[k];
+    out[k] = { positions: new Float32Array(s.pos), speed: new Float32Array(s.speed), flow: new Float32Array(s.flow), layerEnds: s.ends };
+  }
+  // fill missing Z labels from the geometry
+  for (let i = 0; i < layerZ.length; i++) if (layerZ[i] == null) layerZ[i] = i ? layerZ[i - 1] : 0;
 
-  const fd = opts.filamentDiameter || 1.75;
-  const grams = extruded * Math.PI * (fd / 2) ** 2 * (opts.density || 1.24) / 1000;
-  const kiriTime = +(gcode.match(/print time: (\d+)s/)?.[1] || 0);
+  const grams = extruded * fArea * (o.density || 1.24) / 1000;
+  for (const k of FEATURE_KEYS) stats[k].grams = stats[k].filament * fArea * (o.density || 1.24) / 1000;
   return {
-    positions, colors, layerEnds,
-    layers: layerEnds.length,
+    sets: out,
+    stats,
+    layers: layerZ.length,
+    layerZ,
+    layerTime,
     maxZ,
     filamentMM: extruded,
     grams,
+    cost: grams / 1000 * (o.cost || 0),
     seconds: Math.round(time),
-    kiriSeconds: kiriTime,
   };
 }
 
+export function quickMaxZ(gcode) {
+  let max = 0;
+  for (const m of gcode.matchAll(/^;Z:([\d.]+)/gm)) max = Math.max(max, +m[1]);
+  return max;
+}
+
 export function formatDuration(sec) {
-  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
-  return h ? `${h}h ${m}m` : `${m}m`;
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
 }

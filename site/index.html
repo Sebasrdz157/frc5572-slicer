@@ -1,11 +1,11 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FRC 5572 Slicer</title>
-  <meta name="description" content="Browser-based slicer for the team's Creality K1C, Flashforge Adventurer 5M Pro and Prusa MK3S+.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f2a900'/%3E%3Cpath d='M7 22h18M9 18h14M11 14h10M13 10h6' stroke='%23161616' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5572 Slicer</title>
+  <meta name="description" content="FRC 5572's browser slicer for the Creality K1C, Flashforge Adventurer 5M Pro and Prusa MK3S+.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23a40901'/%3E%3Cpath d='M7 23h18M9 19h14M11 15h10M13 11h6' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/app.css">
   <script type="importmap">
   {
@@ -18,175 +18,213 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <span class="logo" aria-hidden="true"></span>
-      <span class="title">FRC 5572 Slicer</span>
+    <span class="brand">5572 Slicer</span>
+    <div class="topbar-filters">
+      <nav class="view-filter" aria-label="Workspace">
+        <button class="filter-btn active" data-view="prepare">Prepare</button>
+        <button class="filter-btn" data-view="preview" id="tab-preview" disabled>Preview</button>
+      </nav>
+      <div class="topbar-divider"></div>
+      <span class="topbar-status" id="topbar-status"></span>
     </div>
-    <div class="top-actions">
-      <label class="btn primary" for="file-input">Open model</label>
-      <input id="file-input" type="file" accept=".stl,.3mf,.obj" multiple hidden>
-      <button class="btn" id="btn-arrange" title="Spread all parts out on the bed">Arrange</button>
-      <button class="btn" id="btn-clear" title="Remove all parts">Clear</button>
+    <div class="topbar-right">
+      <a class="feedback-link" href="https://parts.frc5572.org" target="_blank" rel="noopener">Parts Tracker</a>
+      <button class="btn btn-default" id="btn-export" disabled>Export G-code</button>
+      <button class="btn btn-primary" id="btn-slice" disabled>Slice plate</button>
     </div>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar" id="sidebar">
-      <section class="panel">
-        <h2>Printer</h2>
-        <div class="printer-pick" id="printer-pick" role="radiogroup" aria-label="Printer"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Print settings</h2>
-        <label class="field">
-          <span>Material</span>
-          <select id="material"></select>
-        </label>
-        <p class="hint warn" id="material-warning" hidden></p>
-        <label class="field">
-          <span>Layer height</span>
-          <select id="quality"></select>
-        </label>
-        <label class="field">
-          <span>Strength</span>
-          <select id="strength"></select>
-        </label>
-        <div class="row-2">
-          <label class="field">
-            <span>Walls</span>
-            <input id="walls" type="number" min="1" max="20" step="1">
-          </label>
-          <label class="field">
-            <span>Infill %</span>
-            <input id="infill" type="number" min="0" max="100" step="5">
-          </label>
+  <main class="workspace">
+    <aside class="sidebar" aria-label="Presets and settings">
+      <section class="preset-block">
+        <div class="col-header">
+          <span class="col-title">Printer</span>
+          <span class="header-actions">
+            <button class="icon-btn" id="edit-printer" title="Edit printer settings" aria-label="Edit printer settings">⚙</button>
+          </span>
         </div>
-        <div class="row-2">
-          <label class="field">
-            <span>Top layers</span>
-            <input id="top" type="number" min="0" max="30" step="1">
-          </label>
-          <label class="field">
-            <span>Bottom layers</span>
-            <input id="bottom" type="number" min="0" max="30" step="1">
-          </label>
+        <select class="filter-select wide" id="printer-select" aria-label="Printer preset"></select>
+      </section>
+
+      <section class="preset-block">
+        <div class="col-header">
+          <span class="col-title">Filament</span>
+          <span class="header-actions">
+            <button class="icon-btn" id="edit-filament" title="Edit filament settings" aria-label="Edit filament settings">⚙</button>
+          </span>
         </div>
-        <label class="field">
-          <span>Infill pattern</span>
-          <select id="pattern"></select>
-        </label>
+        <select class="filter-select wide" id="filament-select" aria-label="Filament preset"></select>
+        <div class="filament-summary" id="filament-summary"></div>
+        <p class="notice hidden" id="filament-warning"></p>
       </section>
 
-      <section class="panel">
-        <h2>Supports &amp; adhesion</h2>
-        <label class="check">
-          <input id="supports" type="checkbox">
-          <span>Generate supports</span>
-        </label>
-        <label class="field" id="support-angle-field">
-          <span>Overhang angle (°)</span>
-          <input id="supportAngle" type="number" min="10" max="85" step="5">
-        </label>
-        <label class="field">
-          <span>Bed adhesion</span>
-          <select id="adhesion">
-            <option value="none">None</option>
-            <option value="skirt">Skirt</option>
-            <option value="brim">Brim</option>
-            <option value="raft">Raft</option>
-          </select>
-        </label>
-        <label class="field" id="brim-field">
-          <span>Brim loops</span>
-          <input id="brimLoops" type="number" min="1" max="30" step="1">
-        </label>
-      </section>
+      <section class="preset-block process-block">
+        <div class="col-header">
+          <span class="col-title">Process</span>
+          <span class="header-actions">
+            <button class="icon-btn" id="process-save" title="Save preset" aria-label="Save process preset">💾</button>
+            <button class="icon-btn" id="process-more" title="More preset actions" aria-label="More preset actions">⋯</button>
+          </span>
+        </div>
+        <div class="preset-menu hidden" id="process-menu">
+          <button data-act="save-as">Save as new preset…</button>
+          <button data-act="reset">Discard changes</button>
+          <button data-act="delete">Delete user preset</button>
+          <button data-act="export">Export all my presets…</button>
+          <button data-act="import">Import presets…</button>
+        </div>
+        <input type="file" id="import-input" accept=".json" hidden>
+        <select class="filter-select wide" id="process-select" aria-label="Process preset"></select>
 
-      <details class="panel">
-        <summary><h2>Advanced</h2></summary>
-        <label class="field">
-          <span>Speed %</span>
-          <input id="speedScale" type="number" min="20" max="150" step="5">
-        </label>
-        <label class="field">
-          <span>Flow %</span>
-          <input id="flow" type="number" min="80" max="120" step="1">
-        </label>
-        <p class="hint" id="temp-readout"></p>
-        <button class="btn small ghost" id="btn-reset">Reset settings to defaults</button>
-      </details>
+        <div class="settings-toolbar">
+          <nav class="tab-filter" id="process-tabs" aria-label="Process settings"></nav>
+          <div class="toolbar-row">
+            <input class="search-input" id="settings-search" type="search" placeholder="Search settings" aria-label="Search settings">
+            <label class="switch" title="Show advanced settings">
+              <input type="checkbox" id="advanced-toggle">
+              <span class="switch-track"></span>
+              <span class="switch-label">Advanced</span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-list" id="process-settings"></div>
+      </section>
     </aside>
 
-    <section class="stage">
+    <section class="stage" id="stage">
       <div id="viewport" class="viewport" aria-label="3D view of the build plate"></div>
+
+      <div class="plate-toolbar" id="plate-toolbar" role="toolbar" aria-label="Plate tools">
+        <label class="tool" title="Add models (Ctrl+I)" for="file-input"><span class="tool-icon">＋</span><span>Add</span></label>
+        <input id="file-input" type="file" accept=".stl,.3mf,.obj" multiple hidden>
+        <span class="tool-sep"></span>
+        <button class="tool" id="t-arrange" title="Arrange all objects (A)"><span class="tool-icon">▦</span><span>Arrange</span></button>
+        <button class="tool" id="t-orient" title="Auto orient selected (O)"><span class="tool-icon">⟲</span><span>Orient</span></button>
+        <button class="tool" id="t-layflat" title="Lay on face: click a face of the part (F)"><span class="tool-icon">▁</span><span>Lay on face</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool" id="t-dup" title="Duplicate selected (Ctrl+D)"><span class="tool-icon">⧉</span><span>Copy</span></button>
+        <button class="tool" id="t-del" title="Delete selected (Del)"><span class="tool-icon">✕</span><span>Delete</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool" data-cam="iso" title="Default view (0)"><span class="tool-icon">◰</span><span>Iso</span></button>
+        <button class="tool" data-cam="top" title="Top view (1)"><span class="tool-icon">▣</span><span>Top</span></button>
+        <button class="tool" data-cam="front" title="Front view (2)"><span class="tool-icon">▭</span><span>Front</span></button>
+      </div>
 
       <div class="empty" id="empty-state">
         <div class="empty-card">
           <p class="empty-title">Drop STL, 3MF or OBJ files here</p>
-          <p class="empty-sub">or use <strong>Open model</strong>. Files stay in your browser; nothing is uploaded.</p>
+          <p class="empty-sub">or click <strong>Add</strong>. Files stay in this browser; nothing is uploaded.</p>
+        </div>
+      </div>
+      <div class="drop-overlay hidden" id="drop-overlay">Drop to add to the plate</div>
+
+      <aside class="float-panel objects-panel hidden" id="objects-panel" aria-label="Objects">
+        <div class="col-header">
+          <span class="col-title">Objects</span>
+          <span class="col-count" id="object-count">0</span>
+        </div>
+        <ul class="object-list" id="object-list"></ul>
+
+        <div class="inspector hidden" id="inspector">
+          <div class="section-heading">Transform</div>
+          <div class="xform-grid">
+            <span></span><span class="axis axis-x">X</span><span class="axis axis-y">Y</span><span class="axis axis-z">Z</span>
+            <span class="meta-label">Position</span>
+            <input class="admin-input" data-xf="pos" data-ax="x" type="number" step="1">
+            <input class="admin-input" data-xf="pos" data-ax="y" type="number" step="1">
+            <span class="xf-unit">mm</span>
+            <span class="meta-label">Rotation</span>
+            <input class="admin-input" data-xf="rot" data-ax="x" type="number" step="5">
+            <input class="admin-input" data-xf="rot" data-ax="y" type="number" step="5">
+            <input class="admin-input" data-xf="rot" data-ax="z" type="number" step="5">
+            <span class="meta-label">Scale %</span>
+            <input class="admin-input" data-xf="scale" data-ax="x" type="number" step="1">
+            <input class="admin-input" data-xf="scale" data-ax="y" type="number" step="1">
+            <input class="admin-input" data-xf="scale" data-ax="z" type="number" step="1">
+            <span class="meta-label">Size</span>
+            <input class="admin-input" data-xf="size" data-ax="x" type="number" step="0.1">
+            <input class="admin-input" data-xf="size" data-ax="y" type="number" step="0.1">
+            <input class="admin-input" data-xf="size" data-ax="z" type="number" step="0.1">
+          </div>
+          <div class="xform-actions">
+            <label class="check"><input type="checkbox" id="uniform-scale" checked> Uniform scale</label>
+            <button class="btn btn-default btn-sm" id="btn-inch" title="Model was exported in inches: scale ×25.4">in → mm</button>
+            <button class="btn btn-default btn-sm" id="btn-reset-xf" title="Reset rotation and scale">Reset</button>
+          </div>
+          <p class="notice hidden" id="tiny-hint">This part is very small. If it came from CAD in inches, click <strong>in → mm</strong>.</p>
+        </div>
+
+        <div class="section-heading with-action">
+          <span>Height range modifiers</span>
+          <button class="icon-btn" id="add-range" title="Add a height range with different settings" aria-label="Add height range modifier">＋</button>
+        </div>
+        <div class="ranges" id="ranges"></div>
+      </aside>
+
+      <!-- Preview -->
+      <aside class="float-panel legend-panel hidden" id="legend-panel" aria-label="Preview legend">
+        <div class="col-header">
+          <select class="filter-select" id="color-mode" aria-label="Color scheme">
+            <option value="feature">Line type</option>
+            <option value="speed">Speed</option>
+            <option value="flow">Volumetric flow</option>
+            <option value="z">Height (Z)</option>
+          </select>
+        </div>
+        <table class="legend-table" id="legend-table"></table>
+        <div class="gradient-legend hidden" id="gradient-legend">
+          <div class="gradient-bar"></div>
+          <div class="gradient-labels"><span id="grad-min"></span><span id="grad-max"></span></div>
+        </div>
+        <div class="meta-grid totals" id="totals"></div>
+      </aside>
+
+      <div class="layer-slider hidden" id="layer-slider" aria-label="Layer range">
+        <div class="layer-label" id="layer-hi-label"></div>
+        <div class="slider-track" id="slider-track">
+          <div class="slider-fill" id="slider-fill"></div>
+          <div class="slider-markers" id="slider-markers"></div>
+          <button class="slider-thumb" id="thumb-hi" aria-label="Top layer"></button>
+          <button class="slider-thumb" id="thumb-lo" aria-label="Bottom layer"></button>
+        </div>
+        <div class="layer-label" id="layer-lo-label"></div>
+        <div class="layer-actions">
+          <button class="btn btn-default btn-sm" id="add-pause" title="Pause the print before the top visible layer (to insert nuts or magnets)">Pause here</button>
+          <button class="btn btn-default btn-sm" id="add-change" title="Filament change before the top visible layer">Color change</button>
         </div>
       </div>
 
-      <div class="drop-overlay" id="drop-overlay" hidden>Drop to add to the bed</div>
-
-      <div class="parts" id="parts-panel" hidden>
-        <div class="parts-head">
-          <h3>Parts</h3>
-        </div>
-        <ul id="parts-list"></ul>
-        <div class="part-tools" id="part-tools" hidden>
-          <div class="tool-row">
-            <span class="tool-label">Rotate</span>
-            <button class="btn small" data-rot="x">X 90°</button>
-            <button class="btn small" data-rot="y">Y 90°</button>
-            <button class="btn small" data-rot="z">Z 90°</button>
-          </div>
-          <div class="tool-row">
-            <button class="btn small" id="btn-layflat" title="Click a face of the part to put it on the bed">Lay on face</button>
-            <button class="btn small" id="btn-autoflat" title="Pick the orientation with the largest flat face down">Auto orient</button>
-          </div>
-          <div class="tool-row">
-            <span class="tool-label">Scale %</span>
-            <input id="part-scale" type="number" min="1" max="10000" step="1">
-            <button class="btn small" id="btn-inch" title="Model was exported in inches: scale by 25.4">in → mm</button>
-          </div>
-          <div class="tool-row size" id="part-size"></div>
-          <div class="tool-row">
-            <button class="btn small" id="btn-dup">Duplicate</button>
-            <button class="btn small danger" id="btn-del">Delete</button>
+      <div class="progress-overlay hidden" id="progress">
+        <div class="progress-card">
+          <span class="spinner"></span>
+          <div class="progress-body">
+            <div class="progress-text" id="progress-text">Slicing…</div>
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
           </div>
         </div>
       </div>
 
-      <div class="preview-bar" id="preview-bar" hidden>
-        <div class="legend" id="legend"></div>
-        <label class="layer-slider">
-          <span>Layer <strong id="layer-num">0</strong> / <span id="layer-total">0</span></span>
-          <input type="range" id="layer-range" min="1" max="1" value="1">
-        </label>
-        <button class="btn small" id="btn-back">Back to editing</button>
-      </div>
-
-      <div class="slice-box">
-        <div class="result" id="result" hidden>
-          <div class="stat"><span class="stat-v" id="r-time">-</span><span class="stat-l">print time</span></div>
-          <div class="stat"><span class="stat-v" id="r-weight">-</span><span class="stat-l">filament</span></div>
-          <div class="stat"><span class="stat-v" id="r-layers">-</span><span class="stat-l">layers</span></div>
-        </div>
-        <div class="progress" id="progress" hidden>
-          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-          <span id="progress-text">Slicing...</span>
-        </div>
-        <p class="error" id="error" hidden></p>
-        <div class="slice-actions">
-          <button class="btn primary big" id="btn-slice" disabled>Slice</button>
-          <button class="btn big" id="btn-download" hidden>Download G-code</button>
-        </div>
-        <p class="hint small" id="out-warning" hidden></p>
-      </div>
+      <div class="toast hidden" id="toast" role="status"></div>
     </section>
   </main>
+
+  <!-- Printer / filament editor -->
+  <div id="settings-overlay" class="hidden"></div>
+  <div id="settings-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="settings-header">
+      <h2 id="modal-title">Printer settings</h2>
+      <button class="icon-btn" id="modal-close" aria-label="Close">✕</button>
+    </div>
+    <p class="settings-intro" id="modal-intro"></p>
+    <nav class="tab-filter" id="modal-tabs"></nav>
+    <div class="settings-list modal-list" id="modal-settings"></div>
+    <div class="modal-footer">
+      <button class="btn btn-default" id="modal-reset">Discard changes</button>
+      <span class="spacer"></span>
+      <button class="btn btn-default" id="modal-save-as">Save as…</button>
+      <button class="btn btn-primary" id="modal-save">Save</button>
+    </div>
+  </div>
 
   <script type="module" src="js/app.js"></script>
 </body>

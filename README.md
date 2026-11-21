@@ -1,49 +1,82 @@
-# FRC 5572 Slicer
+# 5572 Slicer
 
-A browser-based 3D-print slicer for the team's printers, hosted on GitHub Pages.
-Open the site on any school computer, drop in an STL/3MF/OBJ, pick a printer, slice, and download G-code.
-Everything runs in the browser: models are never uploaded anywhere.
+A browser-based slicer for FRC 5572's printers, laid out like OrcaSlicer and styled like the
+[Parts Tracker](https://parts.frc5572.org). Hosted on GitHub Pages; everything runs in the browser and
+models are never uploaded.
 
-**Printers**
+**Printers:** Creality K1C · Flashforge Adventurer 5M Pro · Prusa i3 MK3S+.
+Machine G-code, retraction, speeds and accelerations come from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer)'s
+system profiles. Slicing is done by the [Kiri:Moto](https://github.com/GridSpace/grid-apps) engine (MIT), compiled for the browser.
 
-| Printer | Bed (mm) | Notes |
-|---|---|---|
-| Creality K1C | 220 × 220 × 250 | Uses the K1C's `START_PRINT` / `END_PRINT` macros |
-| Flashforge Adventurer 5M Pro | 220 × 220 × 220 | Center-origin coordinates, Flashforge header block |
-| Prusa i3 MK3S+ | 250 × 210 × 210 | Mesh bed leveling, intro line, `M73` progress |
+## Features
 
-Start/end G-code, retraction and bed sizes are adapted from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer)'s system profiles.
-The slicing itself is done by the [Kiri:Moto](https://github.com/GridSpace/grid-apps) engine (MIT license), compiled for the browser.
+**Presets (Orca-style).** Printer, Filament and Process presets with system and user presets, "(modified)"
+markers, per-setting reset, Save / Save as / Delete / Discard, and JSON export/import to share team presets.
+Process presets per printer: 0.08 Extra Fine → 0.28 Extra Draft, plus *Robot Part (Strong) @5572* and
+*Fast Prototype @5572*. Filaments: PLA, PETG, ABS, ASA, TPU 95A, PLA-CF, PETG-CF, PA-CF, with
+per-printer temperatures and hardened-nozzle / enclosure warnings.
 
-## Using it
+**Process settings** (Quality / Strength / Speed / Support / Others, Advanced toggle, search):
+layer height, initial layer, line width, seam position, scarf seam, X-Y hole and contour compensation,
+arc fitting, adaptive layer height, thin-wall detection, wall sequence, alternate wall direction,
+walls, top/bottom shells, solid infill direction, flat-area thresholds, infill density / pattern / overlap,
+per-feature speeds, small-perimeter slowdown, **per-feature acceleration**, normal / tree supports
+(threshold angle, density, XY distance, top gap, expansion), raft, skirt, brim, draft shield,
+**spiral vase**, retract on layer change, avoid crossing gaps, coasting.
 
-1. **Open model** (or drag files onto the bed). Multiple files are fine: they're placed side by side.
-2. Pick the printer on the left. Pick material, layer height and a strength preset.
-   - *Strong (robot part)* = 4 walls, 40 % gyroid. Use it for anything that goes on the robot.
-3. Orient parts: drag to move, **Lay on face** then click the face that should touch the bed, or **Auto orient**.
-   - If a part looks tiny, it was probably exported from CAD in inches: click **in → mm**.
-4. **Slice**. Check the layer preview, then **Download G-code**, copy it to a USB drive and print.
+**Filament settings:** temperatures (initial / other layers), flow ratio, **pressure advance**, max volumetric
+speed, fan, no-cooling layers, minimum layer time, retraction overrides, density and price (for cost).
 
-Print time is an estimate that accounts for acceleration but not heat-up time.
+**Printer settings:** bed size and origin, G-code flavor, editable start / end / layer-change / progress /
+pause / filament-change G-code, retraction, z-hop, wipe, motion limits.
+
+**Plate:** STL / 3MF / OBJ, multiple objects, drag to move, numeric position / rotation / scale / size
+(uniform or per-axis), lay on face, auto orient, arrange, duplicate, in → mm for inch exports,
+**height range modifiers** (e.g. 100 % infill for Z 12–18 mm).
+
+**Preview:** line type / speed / volumetric flow / height color schemes, per-feature time, % and grams,
+show/hide line types (travel hidden by default), dual layer slider, **pause and filament change at a layer**,
+time, filament, cost.
+
+Shortcuts: `Ctrl+I` add, `Ctrl+R` slice, `A` arrange, `O` orient, `F` lay on face, `Ctrl+D` duplicate,
+`Del` delete, `0/1/2` views, `Tab` Prepare ↔ Preview, `↑/↓` layers.
+
+### Compared to OrcaSlicer
+
+Not available because the engine doesn't support them: ironing, fuzzy skin, seam painting,
+support painting/blockers, per-object settings and modifier meshes (height ranges apply to the whole
+plate), Arachne variable-width walls, bridge and overhang speed tiers, separate line widths per feature,
+multi-plate projects, and sending to printers (planned with the remote-printing setup).
+
+Per-feature acceleration, pressure advance, spiral vase and pauses are done by post-processing the
+engine's G-code ([`postprocess.js`](site/js/postprocess.js)).
 
 ## How it's built
 
 ```
-site/                 static site (what GitHub Pages serves)
-  index.html
-  css/app.css
-  js/app.js           UI wiring, settings, download
-  js/viewer.js        three.js build plate: parts, drag, orient, toolpath preview
-  js/printers.js      printer / material / quality profiles  <- edit this to tune prints
-  js/slicer.js        wrapper around the Kiri:Moto engine
-  js/gcode.js         G-code parser for the preview and stats
-  js/loaders.js       STL / 3MF / OBJ loading
-  engine/, wasm/      Kiri:Moto engine (generated, not committed)
-scripts/
-  build-engine.sh     clones Kiri:Moto at a pinned commit, builds it, copies bundles into site/
-  serve.mjs           local test server
-.github/workflows/pages.yml   builds the engine and deploys site/ on every push to main
+site/
+  index.html, css/app.css   UI (Parts Tracker tokens and components)
+  js/app.js                 presets, sidebar, objects, slicing, preview wiring
+  js/schema.js              every setting: label, tab, section, units, tooltips   <- add settings here
+  js/presets.js             system printer / filament / process presets          <- tune profiles here
+  js/kiri-map.js            Orca-style settings -> Kiri:Moto engine settings
+  js/postprocess.js         acceleration, pressure advance, spiral vase, pauses, placeholders
+  js/gcode.js               G-code parser: preview geometry, per-feature stats, time estimate
+  js/viewer.js              three.js plate, transforms, toolpath preview
+  js/settings-ui.js         settings rows renderer
+  js/slicer.js, loaders.js  engine wrapper, model loading
+  engine/, wasm/            Kiri:Moto engine (generated by the build, not committed)
+scripts/build-engine.sh     clones Kiri:Moto at a pinned commit, builds it, copies bundles into site/
+scripts/serve.mjs           local test server
+.github/workflows/pages.yml builds the engine and deploys site/ on every push to main
 ```
+
+### Engine quirks handled in `kiri-map.js` (measured)
+
+- Kiri computes line volume as an ellipse; Orca uses a rounded rectangle. Flow is scaled per layer height to match Orca.
+- Kiri's support angle is measured from vertical; Orca's from horizontal (`90 - angle`).
+- Kiri moves walls by half its compensation value and its outer offset shrinks the part, so hole/contour
+  compensation are passed as `2×` and `-2×` to behave like Orca's per-side values.
 
 ### Run locally
 
@@ -54,24 +87,12 @@ bash scripts/build-engine.sh      # first time only (~3 min)
 node scripts/serve.mjs            # http://localhost:8080/frc5572-slicer/
 ```
 
-### Tuning profiles
-
-All print settings live in [`site/js/printers.js`](site/js/printers.js): temperatures per printer and
-material, speeds, retraction, start/end G-code. Kiri:Moto G-code variables: `{temp}`, `{bed_temp}`,
-`{layers}`, `{layer}`, `{z}`, `{progress}`, `{remain_time}`, plus `%%TOP+N%%` (top of print + N mm),
-which the app fills in after slicing.
-
-### Updating the engine
-
-Change `KIRI_COMMIT` in `scripts/build-engine.sh` and push. CI rebuilds it.
-
 ### Moving to the frc5572 organization
 
-GitHub → repo **Settings → General → Transfer ownership** → `frc5572`. After the transfer, re-enable
-**Settings → Pages → Source: GitHub Actions** in the new repo. The site URL becomes
-`https://frc5572.github.io/frc5572-slicer/` (old links redirect for the repo, but not for Pages).
+GitHub → **Settings → General → Transfer ownership** → `frc5572`, then in the new repo
+**Settings → Pages → Source: GitHub Actions**. The site moves to `https://frc5572.github.io/frc5572-slicer/`.
 
 ## License
 
-MIT for this project's code. The Kiri:Moto engine is MIT, © Stewart Allen; its license is copied to
+MIT for this project's code. Kiri:Moto is MIT, © Stewart Allen; its license is copied to
 `site/engine/LICENSE-kiri-moto.md` during the build.
