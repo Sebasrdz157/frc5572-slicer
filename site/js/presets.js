@@ -164,7 +164,7 @@ const FILAMENT_BASE = {
 // temps: [nozzle initial, nozzle, bed initial, bed]; per-printer overrides in `printers`
 export const SYSTEM_FILAMENTS = {
   pla: { name: 'Generic PLA', filament_type: 'PLA', filament_density: 1.24, filament_cost: 20, max_volumetric_speed: 21,
-    temps: [220, 220, 55, 55], fan_speed: 100, printers: { mk3s: { temps: [215, 210, 60, 60], max_volumetric_speed: 15 }, a1: { temps: [220, 220, 65, 65] } } },
+    temps: [220, 220, 55, 55], fan_speed: 100, printers: { mk3s: { temps: [215, 210, 60, 60], max_volumetric_speed: 15 }, a1: { temps: [220, 220, 65, 65], max_volumetric_speed: 12 } } }, // A1: Bambu's Generic PLA limit
   petg: { name: 'Generic PETG', filament_type: 'PETG', filament_density: 1.27, filament_cost: 22, max_volumetric_speed: 12, flow_ratio: 0.95,
     temps: [240, 240, 70, 70], fan_speed: 40, close_fan_the_first_x_layers: 3, slow_down_layer_time: 8,
     printers: { mk3s: { temps: [240, 250, 85, 90], max_volumetric_speed: 8 } } },

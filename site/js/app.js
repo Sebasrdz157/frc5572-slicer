@@ -520,6 +520,10 @@ async function runSlice() {
     finalizeSlice();
     lap(timings, 'post-process + parse');
     if (!lastSlice.info.layers) throw new Error('The slicer produced no layers. Is the model a closed solid?');
+    // Safety: nothing may print outside the bed (brims, skirts and support pads
+    // extend past the part, which the plate check above doesn't see)
+    const ob = offBed(lastSlice.info, P);
+    if (ob) throw new Error(`Some ${ob.what} would print ${ob.by.toFixed(1)} mm past the edge of the bed. Move the part toward the center or make the brim narrower.`);
     $('btn-export').disabled = false;
     $('tab-preview').disabled = false;
     setView('preview');
@@ -536,6 +540,22 @@ async function runSlice() {
     $('progress').classList.add('hidden');
     $('btn-slice').disabled = !viewer.parts.length;
   }
+}
+
+/** First printed feature that extends past the bed, or null. Preview coords are bed-centered. */
+function offBed(info, P) {
+  const hx = P.bed_x / 2, hy = P.bed_y / 2, tol = 0.3;
+  const names = { wall: 'walls', solid: 'solid infill', sparse: 'infill', support: 'support', brim: 'brim or skirt' };
+  for (const [k, what] of Object.entries(names)) {
+    const pos = info.sets[k]?.positions;
+    if (!pos) continue;
+    let by = 0;
+    for (let i = 0; i < pos.length; i += 3) {
+      by = Math.max(by, Math.abs(pos[i]) - hx, Math.abs(pos[i + 1]) - hy);
+    }
+    if (by > tol) return { what, by };
+  }
+  return null;
 }
 
 /** Apply post-processing (accel, PA, markers) and re-parse. Fast: no re-slice. */
