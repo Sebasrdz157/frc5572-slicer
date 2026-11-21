@@ -23,7 +23,10 @@ fi
 
 cd "$SRC"
 # npm scripts in grid-apps use POSIX shell syntax (mkdir -p, cp -R)
-export npm_config_script_shell="${npm_config_script_shell:-$(command -v bash)}"
+BASH_PATH="$(command -v bash)"
+# on Windows (Git Bash), npm needs a Windows path to the shell
+if command -v cygpath >/dev/null 2>&1; then BASH_PATH="$(cygpath -w "$BASH_PATH")"; fi
+export npm_config_script_shell="${npm_config_script_shell:-$BASH_PATH}"
 
 if [ ! -d node_modules ]; then
   echo ">> installing dependencies (no install scripts, skips electron download)"
@@ -35,7 +38,8 @@ fi
 node "$ROOT/scripts/patch-kiri.mjs" "$SRC"
 
 echo ">> building engine bundles"
-npm run webpack-ext >/dev/null
+# third-party bundles (three.js, jszip, ...) only need building once
+if [ ! -f src/ext/three.js ]; then npm run webpack-ext; fi
 node bin/esbuild.config.mjs prod
 
 rm -rf "$OUT_ENGINE" "$OUT_WASM"

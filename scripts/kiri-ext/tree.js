@@ -1,19 +1,28 @@
-// Tree supports for the Kiri:Moto engine (FRC 5572 Slicer addition, MIT).
+// Organic tree supports for the Kiri:Moto engine (FRC 5572 Slicer addition, MIT).
 // Upstream Kiri has a `sliceSupportTree` option but no implementation; this
 // file is copied into the engine by scripts/patch-kiri.mjs at build time.
 //
-// Works top-down on the slice stack Kiri already computed overhangs for
-// (slice.shadow = new unsupported area at that layer):
-//   1. new overhangs get a grid of branch tips plus a few full interface layers
-//   2. going down, branches drift toward their neighbors (max branch angle)
-//      and merge, growing thicker
-//   3. branches steer around the part; a branch that runs into it rests on it
-//   4. each layer's support area = union of branch circles + interface areas
+// Written from the publicly described approach of Cura / Orca "organic" trees
+// (no code copied; those projects are AGPL), using Orca's default parameters:
+//   tip diameter 0.8 mm, branch diameter 2 mm, branch diameter angle 5°,
+//   preferred branch angle 25°, maximum branch angle 40°, branch distance 1x.
+//
+// Top-down over the slice stack (slice.shadow = new unsupported area per layer):
+//   1. tips: a grid of thin tips under each new overhang, plus a couple of
+//      roof (interface) layers right under the overhang
+//   2. each layer down, every branch looks for its nearest neighbor; pairs move
+//      toward each other at the preferred angle and merge into one thicker
+//      branch (Y-joints). Branches without a partner go straight down.
+//   3. branches steer around the part at up to the maximum angle; a branch that
+//      runs into the part rests on it
+//   4. branch radius ramps from tip to branch size, then grows with length
 // Kiri's existing trim step then clips supports away from the part.
 
 import { newPoint } from '../../../../geo/point.js';
 import { newPolygon } from '../../../../geo/polygon.js';
 import { polygons as POLY } from '../../../../geo/polygons.js';
+
+const DEG = Math.PI / 180;
 
 function inRing(pts, x, y) {
   let inside = false;
@@ -67,62 +76,110 @@ function sample(polys, spacing, minArea) {
         if (inPolys([p], x, y)) { out.push({ x, y }); n++; }
       }
     }
-    if (!n && Math.abs(p.area()) >= minArea) {
-      out.push({ x: (b.minx + b.maxx) / 2, y: (b.miny + b.maxy) / 2 });
-    }
+    if (!n && Math.abs(p.area()) >= minArea) out.push({ x: (b.minx + b.maxx) / 2, y: (b.miny + b.maxy) / 2 });
   }
   return out;
 }
 
+/** Spatial hash for nearest-neighbor lookups. */
+function grid(nodes, cell) {
+  const map = new Map();
+  for (const n of nodes) {
+    const k = `${Math.floor(n.x / cell)},${Math.floor(n.y / cell)}`;
+    const l = map.get(k);
+    if (l) l.push(n); else map.set(k, [n]);
+  }
+  return {
+    near(n, reach) {
+      const r = Math.ceil(reach / cell), cx = Math.floor(n.x / cell), cy = Math.floor(n.y / cell);
+      let best = null, bd = reach;
+      for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+        const l = map.get(`${cx + dx},${cy + dy}`);
+        if (!l) continue;
+        for (const m of l) {
+          if (m === n || m.dead) continue;
+          const d = Math.hypot(m.x - n.x, m.y - n.y);
+          if (d < bd) { bd = d; best = m; }
+        }
+      }
+      return best ? { node: best, d: bd } : null;
+    },
+  };
+}
+
 export function treeSupports(stack, opt) {
-  const { process, lineWidth, sliceHeight, minArea, progress } = opt;
+  const { process, sliceHeight, minArea, progress } = opt;
   const h = sliceHeight;
-  const maxMove = h * Math.tan(40 * Math.PI / 180);          // branch angle
-  const growth = h * Math.tan(5 * Math.PI / 180);            // diameter growth per layer
+  // Orca organic defaults
+  const tipR = 0.4;                                   // tip diameter 0.8 mm
+  const branchR = 1.0;                                // branch diameter 2 mm
+  const grow = h * Math.tan(5 * DEG);                 // branch diameter angle 5°
+  const prefMove = h * Math.tan(25 * DEG);            // preferred branch angle
+  const maxMove = h * Math.tan(40 * DEG);             // maximum branch angle
+  const rampLayers = Math.max(3, Math.round(1.2 / h)); // tip -> branch size over ~1.2 mm
+  const rMax = 3.5;
+  // branch distance 1x branch diameter at Orca's 30% branch density; the
+  // support density setting scales it (15% -> ~2.8 mm, 30% -> 2 mm)
   const density = Math.max(0.05, process.sliceSupportDensity || 0.15);
-  const spacing = Math.max(2.5, Math.min(6, lineWidth * 1.2 / density));
-  const rTip = Math.max(0.8, lineWidth * 1.8);
-  const rMax = 4;
+  const spacing = Math.max(1.6, Math.min(6, 2 * branchR * Math.sqrt(0.3 / density)));
+  const reach = 18;                                   // how far a branch looks for a partner
   const xyDist = process.sliceSupportOffset || 0.4;
-  const attract = spacing * 3;
-  const interfaceLayers = 3;
+  const roofLayers = 2;
 
   let nodes = [];
-  let iface = []; // [{ polys, left }]
+  let roofs = [];
   const top = stack.slice().reverse();
 
   for (let i = 0; i < top.length; i++) {
     const slice = top[i];
     const z = slice.z;
     const part = slice.topPolys() || [];
+    const layersLeft = top.length - i;
 
-    // 1. drift toward neighbors (weighted by size), limited by branch angle
+    // 1. move toward the nearest neighbor at the preferred angle; else straight down
     if (nodes.length > 1) {
-      const moved = nodes.map(n => {
-        let sx = 0, sy = 0, sw = 0;
-        for (const m of nodes) {
-          const d = Math.hypot(m.x - n.x, m.y - n.y);
-          if (d > attract) continue;
-          const w = m.r * m.r;
-          sx += m.x * w; sy += m.y * w; sw += w;
-        }
-        const tx = sx / sw - n.x, ty = sy / sw - n.y, d = Math.hypot(tx, ty);
-        const s = d > maxMove ? maxMove / d : 1;
-        return { ...n, x: n.x + tx * s, y: n.y + ty * s };
-      });
-      nodes = moved;
+      const g = grid(nodes, reach / 2);
+      for (const n of nodes) {
+        n.tx = n.x; n.ty = n.y;
+        const hit = g.near(n, reach);
+        if (!hit) continue;
+        if ((hit.d / 2) / prefMove > layersLeft) continue; // can't meet before the bed
+        const dx = hit.node.x - n.x, dy = hit.node.y - n.y, d = hit.d || 1;
+        const step = Math.min(prefMove, d / 2);
+        n.tx = n.x + dx / d * step; n.ty = n.y + dy / d * step;
+      }
+      for (const n of nodes) { n.x = n.tx; n.y = n.ty; }
     }
 
-    // 2. avoid the part; branches that run into it rest on it
+    // 2. merge branches whose centers have met
+    if (nodes.length > 1) {
+      nodes.sort((a, b) => b.r - a.r);
+      const g = grid(nodes, reach / 2);
+      for (const n of nodes) {
+        if (n.dead) continue;
+        for (let hit; (hit = g.near(n, Math.max(n.r * 0.5, 0.3))); ) {
+          const m = hit.node;
+          const w1 = n.r * n.r, w2 = m.r * m.r;
+          n.x = (n.x * w1 + m.x * w2) / (w1 + w2);
+          n.y = (n.y * w1 + m.y * w2) / (w1 + w2);
+          n.r = Math.min(rMax, Math.max(n.r, m.r)); // Orca: merged branch keeps the larger diameter
+          n.age = Math.max(n.age, m.age);
+          m.dead = true;
+        }
+      }
+      nodes = nodes.filter(n => !n.dead);
+    }
+
+    // 3. avoid the part (up to the max angle); branches that hit it rest on it
     if (part.length && nodes.length) {
       const keep = [];
       for (const n of nodes) {
-        if (inPolys(part, n.x, n.y)) continue; // lands on the part here
+        if (inPolys(part, n.x, n.y)) continue;
         const c = closest(part, n.x, n.y);
         const need = xyDist + n.r;
         if (c && c.d < need) {
           const dx = n.x - c.x, dy = n.y - c.y, d = Math.hypot(dx, dy) || 1;
-          const push = Math.min(need - c.d, maxMove * 1.5);
+          const push = Math.min(need - c.d, maxMove);
           n.x += dx / d * push; n.y += dy / d * push;
           if (inPolys(part, n.x, n.y)) continue;
         }
@@ -131,35 +188,25 @@ export function treeSupports(stack, opt) {
       nodes = keep;
     }
 
-    // 3. merge branches that touch
-    nodes.sort((a, b) => b.r - a.r);
-    const merged = [];
-    for (const n of nodes) {
-      const m = merged.find(o => Math.hypot(o.x - n.x, o.y - n.y) < (o.r + n.r) * 0.8);
-      if (m) {
-        const w1 = m.r * m.r, w2 = n.r * n.r;
-        m.x = (m.x * w1 + n.x * w2) / (w1 + w2);
-        m.y = (m.y * w1 + n.y * w2) / (w1 + w2);
-        m.r = Math.min(rMax, Math.max(m.r, n.r) + 0.25 * Math.min(m.r, n.r));
-      } else merged.push(n);
-    }
-    nodes = merged;
-
-    // 4. new overhangs: tips + interface layers
+    // 4. new overhangs: roof layers + tips
     const fresh = (slice.shadow || []).filter(p => Math.abs(p.area()) >= minArea);
     if (fresh.length) {
-      iface.push({ polys: fresh, left: interfaceLayers });
-      for (const p of sample(fresh, spacing, minArea)) nodes.push({ x: p.x, y: p.y, r: rTip });
+      roofs.push({ polys: fresh, left: roofLayers });
+      for (const p of sample(fresh, spacing, minArea)) nodes.push({ x: p.x, y: p.y, r: tipR, age: 0 });
     }
 
     // 5. this layer's support area
-    const polys = nodes.map(n => newPolygon().centerCircle(newPoint(n.x, n.y, z), n.r, n.r > 2 ? 20 : 12));
-    for (const f of iface) polys.push(...f.polys.map(p => p.cloneZ(z)));
-    slice.supports = polys.length ? POLY.union(POLY.setZ(polys, z), minArea, true) : [];
+    const polys = nodes.map(n => newPolygon().centerCircle(newPoint(n.x, n.y, z), n.r, n.r > 1.5 ? 18 : n.r > 0.7 ? 12 : 8));
+    for (const f of roofs) polys.push(...f.polys.map(p => p.cloneZ(z)));
+    slice.supports = polys.length ? POLY.union(POLY.setZ(polys, z), minArea * 0.25, true) : [];
 
-    // 6. advance
-    iface = iface.filter(f => --f.left > 0);
-    for (const n of nodes) n.r = Math.min(rMax, n.r + growth);
+    // 6. tips ramp up to branch size, then grow with length
+    roofs = roofs.filter(f => --f.left > 0);
+    for (const n of nodes) {
+      n.age++;
+      if (n.age <= rampLayers) n.r = Math.max(n.r, tipR + (branchR - tipR) * (n.age / rampLayers));
+      else n.r = Math.min(rMax, n.r + grow);
+    }
     if (progress && (i & 7) === 0) progress(i / top.length);
   }
 }
