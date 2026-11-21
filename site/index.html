@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRC 5572 Slicer</title>
+  <meta name="description" content="Browser-based slicer for the team's Creality K1C, Flashforge Adventurer 5M Pro and Prusa MK3S+.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f2a900'/%3E%3Cpath d='M7 22h18M9 18h14M11 14h10M13 10h6' stroke='%23161616' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <span class="title">FRC 5572 Slicer</span>
+    </div>
+    <div class="top-actions">
+      <label class="btn primary" for="file-input">Open model</label>
+      <input id="file-input" type="file" accept=".stl,.3mf,.obj" multiple hidden>
+      <button class="btn" id="btn-arrange" title="Spread all parts out on the bed">Arrange</button>
+      <button class="btn" id="btn-clear" title="Remove all parts">Clear</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar" id="sidebar">
+      <section class="panel">
+        <h2>Printer</h2>
+        <div class="printer-pick" id="printer-pick" role="radiogroup" aria-label="Printer"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Print settings</h2>
+        <label class="field">
+          <span>Material</span>
+          <select id="material"></select>
+        </label>
+        <p class="hint warn" id="material-warning" hidden></p>
+        <label class="field">
+          <span>Layer height</span>
+          <select id="quality"></select>
+        </label>
+        <label class="field">
+          <span>Strength</span>
+          <select id="strength"></select>
+        </label>
+        <div class="row-2">
+          <label class="field">
+            <span>Walls</span>
+            <input id="walls" type="number" min="1" max="20" step="1">
+          </label>
+          <label class="field">
+            <span>Infill %</span>
+            <input id="infill" type="number" min="0" max="100" step="5">
+          </label>
+        </div>
+        <div class="row-2">
+          <label class="field">
+            <span>Top layers</span>
+            <input id="top" type="number" min="0" max="30" step="1">
+          </label>
+          <label class="field">
+            <span>Bottom layers</span>
+            <input id="bottom" type="number" min="0" max="30" step="1">
+          </label>
+        </div>
+        <label class="field">
+          <span>Infill pattern</span>
+          <select id="pattern"></select>
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2>Supports &amp; adhesion</h2>
+        <label class="check">
+          <input id="supports" type="checkbox">
+          <span>Generate supports</span>
+        </label>
+        <label class="field" id="support-angle-field">
+          <span>Overhang angle (°)</span>
+          <input id="supportAngle" type="number" min="10" max="85" step="5">
+        </label>
+        <label class="field">
+          <span>Bed adhesion</span>
+          <select id="adhesion">
+            <option value="none">None</option>
+            <option value="skirt">Skirt</option>
+            <option value="brim">Brim</option>
+            <option value="raft">Raft</option>
+          </select>
+        </label>
+        <label class="field" id="brim-field">
+          <span>Brim loops</span>
+          <input id="brimLoops" type="number" min="1" max="30" step="1">
+        </label>
+      </section>
+
+      <details class="panel">
+        <summary><h2>Advanced</h2></summary>
+        <label class="field">
+          <span>Speed %</span>
+          <input id="speedScale" type="number" min="20" max="150" step="5">
+        </label>
+        <label class="field">
+          <span>Flow %</span>
+          <input id="flow" type="number" min="80" max="120" step="1">
+        </label>
+        <p class="hint" id="temp-readout"></p>
+        <button class="btn small ghost" id="btn-reset">Reset settings to defaults</button>
+      </details>
+    </aside>
+
+    <section class="stage">
+      <div id="viewport" class="viewport" aria-label="3D view of the build plate"></div>
+
+      <div class="empty" id="empty-state">
+        <div class="empty-card">
+          <p class="empty-title">Drop STL, 3MF or OBJ files here</p>
+          <p class="empty-sub">or use <strong>Open model</strong>. Files stay in your browser; nothing is uploaded.</p>
+        </div>
+      </div>
+
+      <div class="drop-overlay" id="drop-overlay" hidden>Drop to add to the bed</div>
+
+      <div class="parts" id="parts-panel" hidden>
+        <div class="parts-head">
+          <h3>Parts</h3>
+        </div>
+        <ul id="parts-list"></ul>
+        <div class="part-tools" id="part-tools" hidden>
+          <div class="tool-row">
+            <span class="tool-label">Rotate</span>
+            <button class="btn small" data-rot="x">X 90°</button>
+            <button class="btn small" data-rot="y">Y 90°</button>
+            <button class="btn small" data-rot="z">Z 90°</button>
+          </div>
+          <div class="tool-row">
+            <button class="btn small" id="btn-layflat" title="Click a face of the part to put it on the bed">Lay on face</button>
+            <button class="btn small" id="btn-autoflat" title="Pick the orientation with the largest flat face down">Auto orient</button>
+          </div>
+          <div class="tool-row">
+            <span class="tool-label">Scale %</span>
+            <input id="part-scale" type="number" min="1" max="10000" step="1">
+            <button class="btn small" id="btn-inch" title="Model was exported in inches: scale by 25.4">in → mm</button>
+          </div>
+          <div class="tool-row size" id="part-size"></div>
+          <div class="tool-row">
+            <button class="btn small" id="btn-dup">Duplicate</button>
+            <button class="btn small danger" id="btn-del">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="preview-bar" id="preview-bar" hidden>
+        <div class="legend" id="legend"></div>
+        <label class="layer-slider">
+          <span>Layer <strong id="layer-num">0</strong> / <span id="layer-total">0</span></span>
+          <input type="range" id="layer-range" min="1" max="1" value="1">
+        </label>
+        <button class="btn small" id="btn-back">Back to editing</button>
+      </div>
+
+      <div class="slice-box">
+        <div class="result" id="result" hidden>
+          <div class="stat"><span class="stat-v" id="r-time">-</span><span class="stat-l">print time</span></div>
+          <div class="stat"><span class="stat-v" id="r-weight">-</span><span class="stat-l">filament</span></div>
+          <div class="stat"><span class="stat-v" id="r-layers">-</span><span class="stat-l">layers</span></div>
+        </div>
+        <div class="progress" id="progress" hidden>
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+          <span id="progress-text">Slicing...</span>
+        </div>
+        <p class="error" id="error" hidden></p>
+        <div class="slice-actions">
+          <button class="btn primary big" id="btn-slice" disabled>Slice</button>
+          <button class="btn big" id="btn-download" hidden>Download G-code</button>
+        </div>
+        <p class="hint small" id="out-warning" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

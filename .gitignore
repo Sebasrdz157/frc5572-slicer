@@ -1,0 +1,5 @@
+# built by scripts/build-engine.sh (CI builds these for GitHub Pages)
+site/engine/
+site/wasm/
+.kiri/
+node_modules/
