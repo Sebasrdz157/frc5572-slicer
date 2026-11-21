@@ -2,10 +2,10 @@
 // Upstream Kiri has a `sliceSupportTree` option but no implementation; this
 // file is copied into the engine by scripts/patch-kiri.mjs at build time.
 //
-// Written from the publicly described approach of Cura / Orca "organic" trees
-// (no code copied; those projects are AGPL), using Orca's default parameters:
-//   tip diameter 0.8 mm, branch diameter 2 mm, branch diameter angle 5°,
-//   preferred branch angle 25°, maximum branch angle 40°, branch distance 1x.
+// Written from the publicly described approach of Cura / Orca / Bambu trees
+// (no code copied; those projects are AGPL), tuned against a Bambu Studio
+// tree-support slice: branch counts, diameters, pads and wall loops measured
+// from its G-code.
 //
 // Top-down over the slice stack (slice.shadow = new unsupported area per layer):
 //   1. tips: a grid of thin tips under each new overhang, plus a couple of
@@ -110,21 +110,23 @@ function grid(nodes, cell) {
 export function treeSupports(stack, opt) {
   const { process, sliceHeight, minArea, progress } = opt;
   const h = sliceHeight;
-  // Orca organic defaults
-  const tipR = 0.4;                                   // tip diameter 0.8 mm
-  const branchR = 1.0;                                // branch diameter 2 mm
-  const grow = h * Math.tan(5 * DEG);                 // branch diameter angle 5°
-  const prefMove = h * Math.tan(25 * DEG);            // preferred branch angle
-  const maxMove = h * Math.tan(40 * DEG);             // maximum branch angle
+  // Defaults measured from Bambu Studio / Orca tree slices: tips ~0.8 mm,
+  // branches 2 mm that stay 2 mm unless they merge, merged trunks thicken at
+  // the 5° diameter angle, branches ~5 mm apart (branch distance), 10 mm pads
+  // on the first layer, each branch printed as a single wall loop.
+  const tipR = 0.4;                                    // tip diameter 0.8 mm
+  const branchR = 0.8;                                 // 1.6 mm centerline = 2 mm outside (branch diameter)
+  const grow = h * Math.tan(5 * DEG) * 0.5;            // branch diameter angle 5° (merged trunks only)
+  const prefMove = h * Math.tan(40 * DEG);             // branch angle when merging (Bambu: single 45° angle)
+  const maxMove = h * Math.tan(45 * DEG);              // maximum branch angle
   const rampLayers = Math.max(3, Math.round(1.2 / h)); // tip -> branch size over ~1.2 mm
-  const rMax = 3.5;
-  // branch distance 1x branch diameter at Orca's 30% branch density; the
-  // support density setting scales it (15% -> ~2.8 mm, 30% -> 2 mm)
+  const rMax = 2.6;
   const density = Math.max(0.05, process.sliceSupportDensity || 0.15);
-  const spacing = Math.max(1.6, Math.min(6, 2 * branchR * Math.sqrt(0.3 / density)));
-  const reach = 18;                                   // how far a branch looks for a partner
+  const spacing = Math.max(2.5, Math.min(8, 4.5 * Math.sqrt(0.15 / density))); // tip spacing
+  const reach = spacing * 2.5;                         // only neighbors this close pair up
   const xyDist = process.sliceSupportOffset || 0.4;
   const roofLayers = 2;
+  const padR = 5;                                      // first-layer base pad radius
 
   let nodes = [];
   let roofs = [];
@@ -136,9 +138,9 @@ export function treeSupports(stack, opt) {
     const part = slice.topPolys() || [];
     const layersLeft = top.length - i;
 
-    // 1. move toward the nearest neighbor at the preferred angle; else straight down
+    // 1. pair with the nearest close neighbor and move toward it; else straight down
     if (nodes.length > 1) {
-      const g = grid(nodes, reach / 2);
+      const g = grid(nodes, reach);
       for (const n of nodes) {
         n.tx = n.x; n.ty = n.y;
         const hit = g.near(n, reach);
@@ -151,10 +153,10 @@ export function treeSupports(stack, opt) {
       for (const n of nodes) { n.x = n.tx; n.y = n.ty; }
     }
 
-    // 2. merge branches whose centers have met
+    // 2. merge branches whose centers have met; merged trunks keep the larger diameter
     if (nodes.length > 1) {
       nodes.sort((a, b) => b.r - a.r);
-      const g = grid(nodes, reach / 2);
+      const g = grid(nodes, reach);
       for (const n of nodes) {
         if (n.dead) continue;
         for (let hit; (hit = g.near(n, Math.max(n.r * 0.5, 0.3))); ) {
@@ -162,8 +164,9 @@ export function treeSupports(stack, opt) {
           const w1 = n.r * n.r, w2 = m.r * m.r;
           n.x = (n.x * w1 + m.x * w2) / (w1 + w2);
           n.y = (n.y * w1 + m.y * w2) / (w1 + w2);
-          n.r = Math.min(rMax, Math.max(n.r, m.r)); // Orca: merged branch keeps the larger diameter
+          n.r = Math.min(rMax, Math.max(n.r, m.r));
           n.age = Math.max(n.age, m.age);
+          n.merged = true;
           m.dead = true;
         }
       }
@@ -192,20 +195,41 @@ export function treeSupports(stack, opt) {
     const fresh = (slice.shadow || []).filter(p => Math.abs(p.area()) >= minArea);
     if (fresh.length) {
       roofs.push({ polys: fresh, left: roofLayers });
-      for (const p of sample(fresh, spacing, minArea)) nodes.push({ x: p.x, y: p.y, r: tipR, age: 0 });
+      // only add tips where no existing branch already supports the area
+      // (sloped surfaces add a thin new strip every layer)
+      const g = nodes.length ? grid(nodes, spacing) : null;
+      for (const p of sample(fresh, spacing, minArea)) {
+        if (g && g.near(p, spacing * 0.8)) continue;
+        nodes.push({ x: p.x, y: p.y, r: tipR, age: 0 });
+      }
     }
 
-    // 5. this layer's support area
-    const polys = nodes.map(n => newPolygon().centerCircle(newPoint(n.x, n.y, z), n.r, n.r > 1.5 ? 18 : n.r > 0.7 ? 12 : 8));
-    for (const f of roofs) polys.push(...f.polys.map(p => p.cloneZ(z)));
-    slice.supports = polys.length ? POLY.union(POLY.setZ(polys, z), minArea * 0.25, true) : [];
+    // 5. this layer's support: branch circles (outline only) + roof areas (dense fill).
+    // Roofs are separate polygons listed in slice.treeRoofs so the patched
+    // support fill gives them interface density and the branches none.
+    const bottom = i === top.length - 1;
+    const circles = nodes.map(n => {
+      const r = bottom ? Math.max(n.r, padR) : n.r;
+      return newPolygon().centerCircle(newPoint(n.x, n.y, z), r, r > 1.5 ? 20 : r > 0.7 ? 12 : 8);
+    });
+    const roofPolys = roofs.length ? POLY.union(POLY.setZ(roofs.flatMap(f => f.polys.map(p => p.cloneZ(z))), z), minArea * 0.25, true) : [];
+    let branches = circles.length ? POLY.union(POLY.setZ(circles, z), minArea * 0.25, true) : [];
+    if (roofPolys.length && branches.length) {
+      const rem = [];
+      POLY.subtract(branches, roofPolys, rem, null, z, minArea * 0.25);
+      branches = rem;
+    }
+    slice.supports = [...branches, ...roofPolys];
+    // first-layer base pads are filled solid like roofs (Bambu prints them as discs)
+    const filled = bottom ? slice.supports : roofPolys;
+    slice.treeRoofs = filled.length ? filled : null;
 
-    // 6. tips ramp up to branch size, then grow with length
+    // 6. tips ramp up to branch size; only merged trunks keep thickening
     roofs = roofs.filter(f => --f.left > 0);
     for (const n of nodes) {
       n.age++;
       if (n.age <= rampLayers) n.r = Math.max(n.r, tipR + (branchR - tipR) * (n.age / rampLayers));
-      else n.r = Math.min(rMax, n.r + grow);
+      else if (n.merged) n.r = Math.min(rMax, n.r + grow);
     }
     if (progress && (i & 7) === 0) progress(i / top.length);
   }

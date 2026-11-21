@@ -12,7 +12,24 @@ function featureOf(comment) {
 }
 
 function accelCommand(flavor, a) {
-  return flavor === 'klipper' ? `SET_VELOCITY_LIMIT ACCEL=${a}` : `M204 P${a}`;
+  // M204 S sets printing acceleration on Marlin, Prusa and Bambu firmware alike
+  return flavor === 'klipper' ? `SET_VELOCITY_LIMIT ACCEL=${a}` : `M204 S${a}`;
+}
+
+/** Bounds of the first layer's extrusions, in printer coordinates. */
+function firstLayerBounds(lines) {
+  let layer = 0, minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity, x = 0, y = 0;
+  for (const l of lines) {
+    if (l.startsWith(';LAYER_CHANGE')) { if (++layer > 1) break; continue; }
+    if (!/^G[01] /.test(l)) continue;
+    const nx = num(l, 'X') ?? x, ny = num(l, 'Y') ?? y, e = num(l, 'E');
+    if (layer === 1 && e > 0) {
+      minx = Math.min(minx, x, nx); maxx = Math.max(maxx, x, nx);
+      miny = Math.min(miny, y, ny); maxy = Math.max(maxy, y, ny);
+    }
+    x = nx; y = ny;
+  }
+  return isFinite(minx) ? { minx, miny, maxx, maxy } : null;
 }
 
 const num = (line, axis) => {
@@ -136,5 +153,16 @@ export function postProcess(gcode, { P, F, S, maxZ, markers = [] }) {
   }
 
   const zCap = P.printable_height;
-  return out.join('\n').replace(/%%TOP\+(\d+(?:\.\d+)?)%%/g, (_, n) => Math.min(zCap, maxZ + Number(n)).toFixed(2));
+  // bed-mesh area (Bambu G29 A1 X Y I J): first layer bounds + 5 mm, inside the bed
+  let mesh = `X0 Y0 I${P.bed_x} J${P.bed_y}`;
+  const b = firstLayerBounds(out);
+  if (b) {
+    const x0 = Math.max(0, b.minx - 5), y0 = Math.max(0, b.miny - 5);
+    const x1 = Math.min(P.bed_x, b.maxx + 5), y1 = Math.min(P.bed_y, b.maxy + 5);
+    mesh = `X${x0.toFixed(4)} Y${y0.toFixed(4)} I${(x1 - x0).toFixed(3)} J${(y1 - y0).toFixed(3)}`;
+  }
+  return out.join('\n')
+    .replace(/%%TOP\+(\d+(?:\.\d+)?)%%/g, (_, n) => Math.min(zCap, maxZ + Number(n)).toFixed(2))
+    .replace(/%%FILAMENT_TYPE%%/g, (F.filament_type || 'PLA').replace(/[^\w-]/g, ''))
+    .replace(/%%MESH_AREA%%/g, mesh);
 }

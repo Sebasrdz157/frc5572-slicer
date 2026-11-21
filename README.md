@@ -4,8 +4,8 @@ A browser-based slicer for FRC 5572's printers, laid out like OrcaSlicer and sty
 [Parts Tracker](https://parts.frc5572.org). Hosted on GitHub Pages; everything runs in the browser and
 models are never uploaded.
 
-**Printers:** Creality K1C · Flashforge Adventurer 5M Pro · Prusa i3 MK3S+.
-Machine G-code, retraction, speeds and accelerations come from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer)'s
+**Printers:** Creality K1C · Flashforge Adventurer 5M Pro · Prusa i3 MK3S+ · Bambu Lab A1.
+The Bambu A1 uses Bambu's own start/end G-code taken from a Bambu Studio slice ([`site/js/machines/bambu-a1.js`](site/js/machines/bambu-a1.js)). For the others, machine G-code, retraction, speeds and accelerations come from [OrcaSlicer](https://github.com/OrcaSlicer/OrcaSlicer)'s
 system profiles. Slicing is done by the [Kiri:Moto](https://github.com/GridSpace/grid-apps) engine (MIT), compiled for the browser.
 
 ## Features
@@ -56,8 +56,10 @@ engine's G-code ([`postprocess.js`](site/js/postprocess.js)).
 [`scripts/patch-kiri.mjs`](scripts/patch-kiri.mjs) patches the engine at build time:
 
 - **Tree supports** ([`scripts/kiri-ext/tree.js`](scripts/kiri-ext/tree.js)). Upstream Kiri has a tree option
-  but no implementation (it silently printed normal supports). Branch tips are placed on new overhangs,
-  drift together within a 40° branch angle, merge, thicken, steer around the part and rest on it or the bed.
+  but no implementation (it silently printed normal supports). Tuned against a Bambu Studio A1 slice:
+  thin tips, 2 mm branches printed as single wall loops, branches ~4.5 mm apart that pair up and merge at
+  up to 40°, only merged trunks thicken (5° diameter angle), filled 10 mm base pads, 2 roof layers at
+  interface density. On that part, branch counts and diameters per layer match Bambu's within ~25%.
 - **Gyroid infill** ([`scripts/kiri-ext/gyroid.js`](scripts/kiri-ext/gyroid.js)). Upstream gyroid printed about
   5x too little plastic (40 % gyroid used less than 10 % grid) and stamped hundreds of thousands of tile
   pieces per layer. Replaced with an analytic generator: correct density and far faster.

@@ -27,6 +27,12 @@ const edits = [
     "        // perform accumulation top down\n        for (let slice of stack.slice().reverse()) {",
     "        // perform accumulation top down (skipped for tree supports)\n        for (let slice of (process.sliceSupportTree ? [] : stack.slice().reverse())) {",
   ],
+  // tree supports: branches print as a single outline (no fill, like Bambu/Orca);
+  // only roof (interface) areas get filled, at interface density
+  [
+    "    let polys = slice.supports;\n    if (polys) {\n        supportPolyFill({",
+    "    let polys = slice.supports;\n    if (polys && slice.treeRoofs) {\n        polys = polys.filter(p => slice.treeRoofs.some(r => p.isInside(r, 0.2)));\n        density = Math.max(density, 0.45);\n    }\n    if (polys && polys.length) {\n        supportPolyFill({",
+  ],
 ];
 for (const [from, to] of edits) {
   if (code.includes(to)) continue;

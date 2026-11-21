@@ -128,7 +128,7 @@ export function toKiri(P, F, S) {
     sliceSupportOffset: S.support_object_xy_distance,
     sliceSupportGap: !!S.support_top_z_gap,
     sliceSupportExtra: S.support_expansion,
-    sliceSupportOutline: !!S.support_enclose,
+    sliceSupportOutline: !!S.support_enclose || (S.enable_support && S.support_style === 'tree'), // tree branches are wall loops
     sliceSupportNozzle: 0,
     outputRaft: !!S.raft_enable,
     outputRaftSpacing: S.raft_spacing,

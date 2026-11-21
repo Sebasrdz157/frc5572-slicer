@@ -6,6 +6,8 @@
 // {layer} {layers} {z} {progress} {remain_time}, ";; IF {expr}" blocks, plus
 // %%TOP+N%% which the app fills in after slicing (top of print + N mm).
 
+import { A1_START, A1_END } from './machines/bambu-a1.js';
+
 const lines = (...l) => l.join('\n');
 
 export const SYSTEM_PRINTERS = {
@@ -125,6 +127,35 @@ export const SYSTEM_PRINTERS = {
       sparse_infill_acceleration: 1000, support_acceleration: 1000, initial_layer_acceleration: 800, accel_control: false,
       bottom_shell_layers: 4, top_shell_layers: 5 },
   },
+
+  // Values from a Bambu Studio 2.7 A1 slice (0.4 nozzle, textured PEI plate).
+  // Machine G-code is Bambu's own A1 sequence; see machines/bambu-a1.js.
+  a1: {
+    name: 'Bambu Lab A1 0.4 nozzle', short: 'A1',
+    bed_x: 256, bed_y: 256, printable_height: 256, origin_center: false,
+    gcode_flavor: 'marlin', enclosed: false, hardened_nozzle: false,
+    nozzle_diameter: 0.4, retraction_length: 0.8, retraction_speed: 30, z_hop: 0.4, wipe_distance: 2, deretraction_dwell: 0,
+    machine_max_acceleration: 12000, machine_max_speed: 500, hotend_max_flow: 28,
+    machine_start_gcode: lines(
+      '; HEADER_BLOCK_START',
+      '; total layer number: {layers}',
+      '; max_z_height: %%TOP+0%%',
+      '; HEADER_BLOCK_END',
+      A1_START),
+    machine_end_gcode: A1_END,
+    layer_change_gcode: lines(
+      ';LAYER_CHANGE', ';Z:{z}',
+      '; layer num/total_layer_count: {layer+1}/{layers}',
+      'M73 L{layer+1}',
+      'M991 S0 P{layer} ;notify layer change'),
+    progress_gcode: 'M73 P{progress} R{remain_time}',
+    pause_gcode: 'M400 U1',
+    change_filament_gcode: 'M400 U1',
+    process: { line_width: 0.42, outer_wall_speed: 200, print_speed: 230, initial_layer_speed: 50, initial_layer_infill_speed: 105,
+      travel_speed: 700, default_acceleration: 6000, wall_acceleration: 5000, solid_infill_acceleration: 6000,
+      sparse_infill_acceleration: 6000, support_acceleration: 6000, initial_layer_acceleration: 500, accel_control: true,
+      bottom_shell_layers: 3, top_shell_layers: 5 },
+  },
 };
 
 const FILAMENT_BASE = {
@@ -137,7 +168,7 @@ const FILAMENT_BASE = {
 // temps: [nozzle initial, nozzle, bed initial, bed]; per-printer overrides in `printers`
 export const SYSTEM_FILAMENTS = {
   pla: { name: 'Generic PLA', filament_type: 'PLA', filament_density: 1.24, filament_cost: 20, max_volumetric_speed: 21,
-    temps: [220, 220, 55, 55], fan_speed: 100, printers: { mk3s: { temps: [215, 210, 60, 60], max_volumetric_speed: 15 } } },
+    temps: [220, 220, 55, 55], fan_speed: 100, printers: { mk3s: { temps: [215, 210, 60, 60], max_volumetric_speed: 15 }, a1: { temps: [220, 220, 65, 65] } } },
   petg: { name: 'Generic PETG', filament_type: 'PETG', filament_density: 1.27, filament_cost: 22, max_volumetric_speed: 12, flow_ratio: 0.95,
     temps: [240, 240, 70, 70], fan_speed: 40, close_fan_the_first_x_layers: 3, slow_down_layer_time: 8,
     printers: { mk3s: { temps: [240, 250, 85, 90], max_volumetric_speed: 8 } } },
