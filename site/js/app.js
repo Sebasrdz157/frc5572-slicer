@@ -136,6 +136,7 @@ function renderProcessSettings() {
 function onSettingsChanged() {
   const P = values('printer');
   viewer.setBed({ x: P.bed_x, y: P.bed_y, z: P.printable_height, originCenter: P.origin_center });
+  updateExportLabel();
   renderPresetSelects();
   renderFilamentInfo();
   renderProcessSettings();
@@ -573,12 +574,42 @@ function headerFor(sl) {
 }
 
 $('btn-slice').addEventListener('click', runSlice);
-$('btn-export').addEventListener('click', () => {
+const isBambu = () => systemPrinterOf(state.printerId) === 'a1';
+
+function updateExportLabel() {
+  $('btn-export').textContent = isBambu() ? 'Export .gcode.3mf' : 'Export G-code';
+  $('btn-export').title = isBambu() ? 'Bambu printers print .gcode.3mf files. Shift+click for plain .gcode.' : '';
+}
+
+$('btn-export').addEventListener('click', async e => {
   if (!lastSlice) return;
-  const { P, F, info, parts } = lastSlice;
+  const { P, F, S, info, parts } = lastSlice;
   const base = parts.length === 1 ? parts[0] : `${parts[0]}+${parts.length - 1}`;
-  const name = `${base}_${(SYSTEM_PRINTERS[systemPrinterOf(state.printerId)]?.short || 'printer').replace(/\W+/g, '')}_${F.filament_type}_${formatDuration(info.seconds).replace(/\s/g, '')}.gcode`.replace(/[^\w.+-]/g, '_');
-  download(new Blob([headerFor(lastSlice) + '\n' + lastSlice.gcode], { type: 'text/plain' }), name);
+  const stem = `${base}_${(SYSTEM_PRINTERS[systemPrinterOf(state.printerId)]?.short || 'printer').replace(/\W+/g, '')}_${F.filament_type}_${formatDuration(info.seconds).replace(/\s/g, '')}`.replace(/[^\w.+-]/g, '_');
+  if (!isBambu()) {
+    download(new Blob([headerFor(lastSlice) + '\n' + lastSlice.gcode], { type: 'text/plain' }), `${stem}.gcode`);
+    return;
+  }
+  // Bambu: header block first (firmware reads it), our summary after it
+  const { bambuGcode, buildGcode3mf } = await import('./bambu3mf.js');
+  const gcode = bambuGcode(headerFor(lastSlice) + '\n' + lastSlice.gcode, info, F);
+  if (e.shiftKey) { download(new Blob([gcode], { type: 'text/plain' }), `${stem}.gcode`); return; }
+  const btn = $('btn-export');
+  btn.disabled = true; btn.textContent = 'Packaging…';
+  try {
+    const wasPreview = view === 'preview';
+    const thumb = await viewer.snapshot(512);
+    const thumbSmall = await viewer.snapshot(128);
+    if (wasPreview) viewer.setLayerRange(range.lo, range.hi);
+    const blob = await buildGcode3mf({ gcode, info, P, F, S, parts, thumb, thumbSmall });
+    download(blob, `${stem}.gcode.3mf`);
+  } catch (err) {
+    console.error(err);
+    toast(`Export failed: ${err.message}`, true);
+  } finally {
+    btn.disabled = false;
+    updateExportLabel();
+  }
 });
 
 // ======================================================================

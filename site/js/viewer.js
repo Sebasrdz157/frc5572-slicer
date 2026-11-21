@@ -399,6 +399,39 @@ export class Viewer extends EventTarget {
     this.dispatchEvent(new CustomEvent('layflat', { detail: on }));
   }
 
+  /**
+   * Render the parts (not toolpaths) to a square PNG, framed like Bambu's plate
+   * thumbnails. Returns PNG bytes.
+   */
+  async snapshot(size = 512) {
+    const r = this.renderer, cam = this.camera.clone();
+    const prev = { w: r.domElement.width, h: r.domElement.height, ratio: r.getPixelRatio(), parts: this.partGroup.visible, paths: this.pathGroup.visible, bed: this.bedGroup.visible, bg: this.scene.background };
+    const box = new THREE.Box3();
+    for (const p of this.parts) box.union(this.box(p));
+    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+    const rad = Math.max(s.x, s.y, s.z) * 0.75 || 50;
+    cam.aspect = 1; cam.fov = 30;
+    cam.position.set(c.x + rad * 1.6, c.y - rad * 2.6, c.z + rad * 2.2);
+    cam.lookAt(c);
+    cam.updateProjectionMatrix();
+    this.partGroup.visible = true; this.pathGroup.visible = false; this.bedGroup.visible = false;
+    this.scene.background = null;
+    for (const p of this.parts) p.mesh.material.color.setHex(0xc8ccd6);
+    r.setPixelRatio(1);
+    r.setSize(size, size, false);
+    r.setClearColor(0x000000, 0);
+    r.render(this.scene, cam);
+    const blob = await new Promise(res => r.domElement.toBlob(res, 'image/png'));
+    // restore
+    r.setClearColor(0x000000, 1);
+    this.scene.background = prev.bg;
+    this.partGroup.visible = prev.parts; this.pathGroup.visible = prev.paths; this.bedGroup.visible = prev.bed;
+    r.setPixelRatio(prev.ratio);
+    this._resize();
+    this._recolor();
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
   // ---------- export ----------
   exportSTL() {
     let tris = 0;

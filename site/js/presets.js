@@ -136,12 +136,8 @@ export const SYSTEM_PRINTERS = {
     gcode_flavor: 'marlin', enclosed: false, hardened_nozzle: false,
     nozzle_diameter: 0.4, retraction_length: 0.8, retraction_speed: 30, z_hop: 0.4, wipe_distance: 2, deretraction_dwell: 0,
     machine_max_acceleration: 12000, machine_max_speed: 500, hotend_max_flow: 28,
-    machine_start_gcode: lines(
-      '; HEADER_BLOCK_START',
-      '; total layer number: {layers}',
-      '; max_z_height: %%TOP+0%%',
-      '; HEADER_BLOCK_END',
-      A1_START),
+    // the Bambu header block is written at the top of the file on export (bambu3mf.js)
+    machine_start_gcode: A1_START,
     machine_end_gcode: A1_END,
     layer_change_gcode: lines(
       ';LAYER_CHANGE', ';Z:{z}',
