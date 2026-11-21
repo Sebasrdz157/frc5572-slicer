@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FEATURES, FEATURE_KEYS } from './gcode.js';
+import { makeTubes, setTubeLayers } from './tubes.js';
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
@@ -429,21 +430,26 @@ export class Viewer extends EventTarget {
   }
 
   // ---------- toolpath preview ----------
-  showToolpaths(info) {
+  /** @param info parsed G-code, @param opts { width } line width for filament rendering */
+  showToolpaths(info, opts = {}) {
     this.clearToolpaths(false);
     this.paths = { info, lines: {} };
     for (const k of FEATURE_KEYS) {
       const s = info.sets[k];
       if (!s.positions.length) continue;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(s.positions, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(s.positions.length), 3));
-      const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: k === 'travel', opacity: k === 'travel' ? 0.5 : 1 });
-      const lines = new THREE.LineSegments(geo, mat);
-      lines.frustumCulled = false;
-      lines.visible = !this.hidden.has(k);
-      this.pathGroup.add(lines);
-      this.paths.lines[k] = lines;
+      let obj;
+      if (k === 'travel') {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(s.positions, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(s.positions.length), 3));
+        obj = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 }));
+      } else {
+        obj = makeTubes(s.positions, s.layerEnds, info.layerZ, opts.width || 0.42);
+      }
+      obj.frustumCulled = false;
+      obj.visible = !this.hidden.has(k);
+      this.pathGroup.add(obj);
+      this.paths.lines[k] = obj;
     }
     this.partGroup.visible = false;
     this.mode = 'preview';
@@ -456,20 +462,23 @@ export class Viewer extends EventTarget {
     if (!this.paths) return;
     const { info } = this.paths;
     const range = this.colorRange(mode);
-    for (const [k, lines] of Object.entries(this.paths.lines)) {
+    for (const [k, obj] of Object.entries(this.paths.lines)) {
       const s = info.sets[k];
-      const col = lines.geometry.attributes.color.array;
       const base = FEATURES[k].color;
-      const n = s.positions.length / 3;
-      for (let i = 0; i < n; i++) {
+      const segs = s.positions.length / 6;
+      const tube = k !== 'travel';
+      const attr = tube ? obj.geometry.attributes.iColor : obj.geometry.attributes.color;
+      const col = attr.array;
+      for (let i = 0; i < segs; i++) {
         let c = base;
-        if (mode !== 'feature' && k !== 'travel') {
-          const val = mode === 'speed' ? s.speed[i] : mode === 'flow' ? s.flow[i] : s.positions[i * 3 + 2];
+        if (mode !== 'feature' && tube) {
+          const val = mode === 'speed' ? s.speed[i * 2] : mode === 'flow' ? s.flow[i * 2] : s.positions[i * 6 + 5];
           c = gradient((val - range.min) / (range.max - range.min || 1));
         }
-        col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+        if (tube) { col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2]; }
+        else for (const o of [i * 6, i * 6 + 3]) { col[o] = c[0]; col[o + 1] = c[1]; col[o + 2] = c[2]; }
       }
-      lines.geometry.attributes.color.needsUpdate = true;
+      attr.needsUpdate = true;
     }
   }
 
@@ -498,11 +507,12 @@ export class Viewer extends EventTarget {
   /** Show layers lo..hi (1-based, inclusive). */
   setLayerRange(lo, hi) {
     if (!this.paths) return;
-    for (const [k, lines] of Object.entries(this.paths.lines)) {
+    for (const [k, obj] of Object.entries(this.paths.lines)) {
+      if (k !== 'travel') { setTubeLayers(obj, lo, hi); continue; }
       const ends = this.paths.info.sets[k].layerEnds;
       const start = lo >= 2 ? ends[lo - 2] : 0;
       const end = hi >= 1 ? ends[Math.min(hi, ends.length) - 1] : 0;
-      lines.geometry.setDrawRange(start, Math.max(0, end - start));
+      obj.geometry.setDrawRange(start, Math.max(0, end - start));
     }
   }
 

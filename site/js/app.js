@@ -498,23 +498,34 @@ async function runSlice() {
   $('progress').classList.remove('hidden');
   setProgress(0, 'Loading slicer');
   const t0 = performance.now();
+  let t = t0;
+  const lap = (timings, name) => { const now = performance.now(); timings[name] = Math.round(now - t); t = now; };
   try {
+    const timings = {};
     slicerModule ||= await import('./slicer.js');
+    lap(timings, 'load engine code');
     const P = values('printer'), F = values('filament'), S = values('process');
     const { device, process } = toKiri(P, F, S);
     process.ranges = kiriRanges(S, F);
     const stl = viewer.exportSTL();
-    const raw = await slicerModule.slice({ stl: stl.buffer, center: stl.center, device, process }, setProgress);
+    lap(timings, 'merge models');
+    const res = await slicerModule.slice({ stl: stl.buffer, center: stl.center, device, process, controller: window.slicerController /* debug override */ }, setProgress);
+    Object.assign(timings, res.timings);
+    t = performance.now();
     setProgress(1, 'Building preview');
     await new Promise(r => setTimeout(r, 0));
-    lastSlice = { raw, P, F, S, parts: viewer.parts.map(p => p.name) };
+    lastSlice = { raw: res.gcode, P, F, S, parts: viewer.parts.map(p => p.name), triangles: stl.triangles };
     state.markers = [];
     finalizeSlice();
+    lap(timings, 'post-process + parse');
     if (!lastSlice.info.layers) throw new Error('The slicer produced no layers. Is the model a closed solid?');
     $('btn-export').disabled = false;
     $('tab-preview').disabled = false;
     setView('preview');
-    console.info(`sliced in ${Math.round(performance.now() - t0)} ms`);
+    lap(timings, 'build preview');
+    timings.total = Math.round(performance.now() - t0);
+    lastSlice.timings = timings;
+    console.info('slice timings (ms)', timings);
   } catch (err) {
     console.error(err);
     lastSlice = null;
@@ -585,7 +596,7 @@ function setView(v) {
   if (preview) {
     viewer.select(null);
     viewer.setLayFlat(false);
-    viewer.showToolpaths(lastSlice.info);
+    viewer.showToolpaths(lastSlice.info, { width: lastSlice.S.line_width });
     range = { lo: 1, hi: lastSlice.info.layers };
   } else {
     viewer.clearToolpaths();

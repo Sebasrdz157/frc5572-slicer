@@ -50,7 +50,7 @@ export const PROCESS = [
   { key: 'min_layer_height', tab: 'quality', section: 'Variable layer height', label: 'Minimum layer height', type: 'number', ...mm, min: 0.04, max: 0.3,
     show: v => v.adaptive_layer_height },
   { key: 'detect_thin_wall', tab: 'quality', section: 'Walls and surfaces', label: 'Detect thin walls', type: 'select', options: THIN_WALLS,
-    tip: 'Fills gaps between walls that are too narrow for a full line.' },
+    tip: 'Fills gaps between walls that are too narrow for a full line. Slow: can make slicing several times longer. Off by default, like Orca.' },
   { key: 'wall_sequence', tab: 'quality', section: 'Walls and surfaces', label: 'Wall sequence', type: 'select', options: WALL_SEQUENCE,
     tip: 'Inner/Outer gives the best overhangs. Outer/Inner gives the most accurate outside dimensions.' },
   { key: 'alternate_wall_direction', tab: 'quality', section: 'Walls and surfaces', label: 'Alternate wall direction', type: 'bool', adv: true,
@@ -72,7 +72,8 @@ export const PROCESS = [
   { key: 'solid_infill_expansion', tab: 'strength', section: 'Top/bottom shells', label: 'Solid infill expansion', type: 'number', ...mm, min: 0, max: 10, adv: true,
     tip: 'Grows solid areas so they anchor better over sparse infill.' },
   { key: 'sparse_infill_density', tab: 'strength', section: 'Sparse infill', label: 'Sparse infill density', type: 'number', ...pct, min: 0, max: 100 },
-  { key: 'sparse_infill_pattern', tab: 'strength', section: 'Sparse infill', label: 'Sparse infill pattern', type: 'select', options: INFILL_PATTERNS },
+  { key: 'sparse_infill_pattern', tab: 'strength', section: 'Sparse infill', label: 'Sparse infill pattern', type: 'select', options: INFILL_PATTERNS, icons: true,
+    tip: 'Grid and Rectilinear slice fastest. Gyroid is strong in every direction but takes longer to slice on large parts.' },
   { key: 'infill_wall_overlap', tab: 'strength', section: 'Sparse infill', label: 'Infill/wall overlap', type: 'number', ...pct, min: 0, max: 100, adv: true },
   { key: 'infill_layer_repeat', tab: 'strength', section: 'Sparse infill', label: 'Infill direction repeat', type: 'number', step: 1, min: 1, max: 10, adv: true,
     show: v => v.sparse_infill_pattern === 'linear', tip: 'Layers before rectilinear infill changes direction.' },
@@ -98,7 +99,7 @@ export const PROCESS = [
 
   // ---------- Support ----------
   { key: 'enable_support', tab: 'support', section: 'Support', label: 'Enable support', type: 'bool' },
-  { key: 'support_style', tab: 'support', section: 'Support', label: 'Style', type: 'select', options: SUPPORT_STYLES, show: v => v.enable_support },
+  { key: 'support_style', tab: 'support', section: 'Support', label: 'Style', type: 'select', options: SUPPORT_STYLES, icons: true, show: v => v.enable_support },
   { key: 'support_threshold_angle', tab: 'support', section: 'Support', label: 'Threshold angle', type: 'number', unit: '°', step: 1, min: 0, max: 90, show: v => v.enable_support,
     tip: 'Overhangs steeper than this (measured from vertical) get support.' },
   { key: 'support_density', tab: 'support', section: 'Support', label: 'Base pattern density', type: 'number', ...pct, min: 1, max: 100, show: v => v.enable_support },

@@ -32,6 +32,8 @@ if [ ! -d node_modules ]; then
   node bin/install-pre.js >/dev/null
 fi
 
+node "$ROOT/scripts/patch-kiri.mjs" "$SRC"
+
 echo ">> building engine bundles"
 npm run webpack-ext >/dev/null
 node bin/esbuild.config.mjs prod

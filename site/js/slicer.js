@@ -8,10 +8,18 @@ const poolURL = new URL('../engine/kiri-pool.js', import.meta.url).href;
  * Slice a merged binary STL.
  * @param {object} job - { stl: ArrayBuffer, center: {x,y}, device, process }
  * @param {(fraction:number, label:string) => void} onProgress
- * @returns {Promise<string>} G-code
+ * @returns {Promise<{ gcode: string, timings: object }>}
  */
 export async function slice(job, onProgress = () => {}) {
+  const timings = {};
+  let t = performance.now();
+  const lap = name => { const now = performance.now(); timings[name] = Math.round(now - t); t = now; };
+
   const engine = new Engine({ workURL, poolURL });
+  // The engine API leaves the controller empty, which makes Kiri slice on one
+  // core. The Kiri app itself runs with threaded: true (worker pool).
+  engine.setController({ threaded: true, ...(job.controller || {}) });
+  lap('engine start');
   let phase = 'Slicing';
   const ranges = { Slicing: [0, 0.6], 'Planning paths': [0.6, 0.9], 'Writing G-code': [0.9, 1] };
   const report = f => {
@@ -34,11 +42,15 @@ export async function slice(job, onProgress = () => {}) {
   engine.move(job.center.x, job.center.y, 0);
   engine.setDevice(job.device);
   engine.setProcess(job.process);
+  lap('parse model');
   await engine.slice();
+  lap('slice');
   phase = 'Planning paths'; report(0);
   await engine.prepare();
+  lap('plan paths');
   phase = 'Writing G-code'; report(0);
   const gcode = await engine.export();
+  lap('write gcode');
   report(1);
-  return gcode.replace(/\r\n/g, '\n');
+  return { gcode: gcode.replace(/\r\n/g, '\n'), timings };
 }

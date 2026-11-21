@@ -165,7 +165,7 @@ const PROCESS_BASE = {
   layer_height: 0.2, initial_layer_print_height: 0.2, line_width: 0.42,
   seam_position: 'aligned', scarf_seam_length: 0, xy_hole_compensation: 0, xy_contour_compensation: 0,
   arc_fitting: false, arc_tolerance: 0.15, adaptive_layer_height: false, min_layer_height: 0.08,
-  detect_thin_wall: 'basic', wall_sequence: 'in-out', alternate_wall_direction: false, solidify: false, anti_backlash: 0,
+  detect_thin_wall: 'off', wall_sequence: 'in-out', alternate_wall_direction: false, solidify: false, anti_backlash: 0,
   wall_loops: 2, top_shell_layers: 5, bottom_shell_layers: 3, solid_infill_direction: 45, minimum_flat_area: 1,
   flat_area_threshold: 0.4, solid_infill_expansion: 0, sparse_infill_density: 15, sparse_infill_pattern: 'grid',
   infill_wall_overlap: 25, infill_layer_repeat: 1,
